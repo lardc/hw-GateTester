@@ -44,7 +44,7 @@ static _iq CurrentRate, Ki, EndCurrent, CloseDelta, CloseRate, FineIH, OffsetIH;
 static Int16U InternalFaultReason, InternalWarning, InternalProblem, StabCounter, StrikePulseLengthUS;
 static Int16S SamplesI[SAMPLE_FILTER_LENGTH - 1];
 //
-static volatile Boolean Active, FreezeControl;
+static volatile Boolean Active, FreezeControl, CombinedWithSL;
 static volatile _iq ControlSignal, TargetI, NowI, NowIM1, NowIM2;
 
 
@@ -84,6 +84,8 @@ void HOLDING_Prepare()
 #endif
 Boolean HOLDING_Process(pInt16U FaultReason, pInt16U Problem, pInt16U Warning)
 {
+	static Int64U Timeout = 0;
+
 	*FaultReason = FAULT_NONE;
 	*Problem = PROBLEM_NONE;
 	*Warning = WARNING_NONE;
@@ -101,11 +103,13 @@ Boolean HOLDING_Process(pInt16U FaultReason, pInt16U Problem, pInt16U Warning)
 				NowIM1 = NowIM2 = 0;
 
 				ZbGPIO_SwitchH(TRUE);
-				ZbGPIO_SwitchExternalDriver(TRUE);
+				ZbGPIO_SwitchExternalDriver(!CombinedWithSL);
 
 				Active = TRUE;
 				FreezeControl = FALSE;
 				CONTROL_SwitchRTCycle(TRUE);
+
+				Timeout = CONTROL_TimeCounter + DataTable[REG_HOLD_WAIT_TIMEOUT];
 				State = HOLDING_STATE_RISE;
 			}
 			break;
@@ -114,17 +118,15 @@ Boolean HOLDING_Process(pInt16U FaultReason, pInt16U Problem, pInt16U Warning)
 				if(_IQabs(NowI - TargetI) < HOLD_START_CURRENT_TOLERANCE)
 				{
 					ZbGPIO_SwitchExternalDriver(FALSE);
-					State = UseStrike ? HOLDING_STATE_STRIKE : HOLDING_STATE_WAIT_STAB;
+					State = (UseStrike && !CombinedWithSL) ? HOLDING_STATE_STRIKE : HOLDING_STATE_WAIT_STAB;
 				}
-				
-				MU_LogScope(NowI, 0, TargetI, _IQint(ControlSignal));
-				
-				if(CONTROL_Values_1_Counter == DataTable[REG_HOLD_WAIT_TIMEOUT])
+				else if(CONTROL_TimeCounter > Timeout)
 				{
 					InternalProblem = PROBLEM_HOLD_REACH_TIMEOUT;
-					ZbGPIO_SwitchExternalDriver(FALSE);
 					State = HOLDING_STATE_FINISH;
 				}
+
+				MU_LogScope(NowI, 0, TargetI, _IQint(ControlSignal));
 			}
 			break;
 		case HOLDING_STATE_STRIKE:
@@ -195,6 +197,7 @@ Boolean HOLDING_Process(pInt16U FaultReason, pInt16U Problem, pInt16U Warning)
 				Active = FALSE;
 				ZwADC_SubscribeToResults1(NULL);
 
+				ZbGPIO_SwitchExternalDriver(FALSE);
 				ZbGPIO_SwitchH(FALSE);
 
 				*Warning = InternalWarning;
@@ -219,6 +222,7 @@ static void HOLDING_CacheVariables()
 	StrikePulseLengthUS = DataTable[REG_HOLD_STRIKE_PULSE_LEN];
 	FineIH = _IQdiv(_IQI(DataTable[REG_HOLD_FINE_IHL_N]), _IQI(DataTable[REG_HOLD_FINE_IHL_D]));
 	OffsetIH = _IQI((Int16S)DataTable[REG_HOLD_IHL_OFFSET]);
+	CombinedWithSL = DataTable[REG_HOLD_WITH_SL];
 }
 // ----------------------------------------
 
@@ -280,5 +284,3 @@ static void HOLDING_Cycle()
 	}
 }
 // ----------------------------------------
-
-// No more

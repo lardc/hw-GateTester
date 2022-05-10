@@ -88,6 +88,7 @@
 // ----------------------------------------
 #define REG_GATE_VGT_PURE			128	// Sample VGT after terminating main current
 #define REG_HOLD_USE_STRIKE			129	// Strike pulse before holding current
+#define REG_HOLD_WITH_SL			130	// Measure holding current with static losses
 //
 #define REG_CAL_CURRENT				140	// Calibration current
 //
